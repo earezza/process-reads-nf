@@ -92,10 +92,13 @@ process CUTADAPT_PAIRED {
 
     output:
         path "cutadapt_${sample.baseName}.log"
-        //tuple path(sample), path("${reads.first.name.replace('.fastq.gz', '_trimmed.fastq')}"), path("${reads.last.name.replace('.fastq.gz', '_trimmed.fastq')}"), emit: trimmed_reads
+        //tuple path(sample), path("${reads[0].name.replace('.fastq.gz', '_trimmed.fastq')}"), path("${reads[1].name.replace('.fastq.gz', '_trimmed.fastq')}"), emit: trimmed_reads
         tuple path(sample), path("*_R{1,2}_trimmed.fastq"), emit: trimmed_reads
 
     script:
+        //println "${reads[0].name.replace('.fastq.gz', '_adapt-trimmed.fastq')}"
+        //println "${reads[1].name.replace('.fastq.gz', '_adapt-trimmed.fastq')}"
+
         adapters = params.adapters ? "-a CTGTCTCTTATACACATCT -A CTGTCTCTTATACACATCT" : ""
         trim = params.qctrim ? "-m 20 -q 20,20 -u 11 -U 11" : ""
 
@@ -113,7 +116,7 @@ process CUTADAPT_PAIRED {
         }
 
 }
-// TODO: MODIFY FILE NAMES TO THE INPUT FILE NAME INSTEAD OF THE SAMPLE DIRECTORY NAME AS IN THIS PROCESS...
+
 process CUTADAPT_SINGLE {
     cpus Math.max(1, Runtime.runtime.availableProcessors() * 0.2 as int) 
     label 'cutadapt_trim_single'
@@ -167,7 +170,7 @@ process BOWTIE2_PAIRED {
         """
         #!/bin/bash
         bowtie2 -p $task.cpus --local --very-sensitive-local --no-unal --no-mixed --no-discordant --phred33 -I 10 -X 700 \
-        -x $params.genome_index -1 $reads[0] -2 $reads[1] \
+        -x $params.genome_index -1 ${reads[0]} -2 ${reads[1]} \
         --rg-id $params.rg_id --rg SM:$params.rg_sm --rg LB:$params.rg_lb --rg PU:$params.rg_pu --rg PL:$params.rg_pl \
         2> bowtie2_${sample.baseName}.log | samtools view -bS - > ${reads_name}.bam 
         """
@@ -218,7 +221,7 @@ process HISAT2_PAIRED {
         """
         #!/bin/bash
         hisat2 -p $task.cpus --no-unal --no-mixed --no-discordant --phred33 -I 10 -X 700 \
-        -x $params.genome_index -1 $reads[0] -2 $reads[1] \
+        -x $params.genome_index -1 ${reads[0]} -2 ${reads[1]} \
         --rg-id $params.rg_id --rg SM:$params.rg_sm --rg LB:$params.rg_lb --rg PU:$params.rg_pu --rg PL:$params.rg_pl \
         2> hisat2_${sample.baseName}.log | samtools view -bS - > ${reads_name}.bam
         """
@@ -366,7 +369,7 @@ process MULTIQC {
     publishDir "${sample}/", mode: 'copy', overwrite: false, pattern: "*.{html}"
 
     input:
-        tuple path(sample), path(bam), path(bai)
+        tuple path(sample), path(bam)
         path multiqc_config
 
     output:
@@ -395,7 +398,7 @@ process BIGWIG_COVERAGE {
         path "${bam.name.split('\\.')[0]}_${params.normalize_by}.bw", emit: bigwig
 
     script:
-        blacklist = ("$blacklist_file" == "NO_BLACKLIST_FILE") ? "" : "--blackListFileName $blacklist_file"
+        blacklist = ("$blacklist_file" == "NO_BLACKLIST_FILE") ? '' : "--blackListFileName $blacklist_file"
         coverage_options = "--binSize 10 --ignoreForNormalization 'chrM' $blacklist --normalizeUsing '${params.normalize_by}' --numberOfProcessors $task.cpus"
         if (params.reads_type == 'paired'){
             coverage_options += " --extendReads"
@@ -429,7 +432,7 @@ process BIGWIG_COVERAGE_STRANDED {
         path "${bam.name.split('\\.')[0]}_${params.normalize_by}.${direction}.bw", emit: bigwig
 
     script:
-        blacklist = ("$blacklist_file" == "NO_BLACKLIST_FILE") ? "" : "--blackListFileName $blacklist_file"
+        blacklist = ("$blacklist_file" == "NO_BLACKLIST_FILE") ? '' : "--blackListFileName $blacklist_file"
         coverage_options = "--binSize 10 --ignoreForNormalization 'chrM' $blacklist --normalizeUsing '${params.normalize_by}' --numberOfProcessors $task.cpus"
         """
         #!/bin/bash
@@ -453,7 +456,7 @@ process BIGWIG_BAMCOMPARE {
         path "${bam_target.name.split('\\.')[0]}_without_${bam_control.name.split('\\.')[0]}_${params.normalize_by}.bw", emit: bigwig
 
     script:
-        blacklist = ("$blacklist_file" == "NO_BLACKLIST_FILE") ? "" : "--blackListFileName $blacklist_file"
+        blacklist = ("$blacklist_file" == "NO_BLACKLIST_FILE") ? '' : "--blackListFileName $blacklist_file"
         coverage_options = "--binSize 10 --ignoreForNormalization 'chrM' $blacklist --normalizeUsing '${params.normalize_by}' --numberOfProcessors $task.cpus"
         if (params.reads_type == 'paired'){
             coverage_options += " --extendReads"
@@ -488,7 +491,7 @@ process BEDGRAPH_COVERAGE {
         tuple path(sample), path("${bam.name.split('\\.')[0]}_${params.normalize_by}.bedgraph"), emit: bedgraph
 
     script:
-        blacklist = ("$blacklist_file" == "NO_BLACKLIST_FILE") ? "" : "--blackListFileName $blacklist_file"
+        blacklist = ("$blacklist_file" == "NO_BLACKLIST_FILE") ? '' : "--blackListFileName $blacklist_file"
         coverage_options = "--binSize 10 --ignoreForNormalization 'chrM' $blacklist --normalizeUsing '${params.normalize_by}' --numberOfProcessors $task.cpus"
         if (params.reads_type == 'paired'){
             coverage_options += " --extendReads"
@@ -704,7 +707,7 @@ process GOPEAKS_PEAKS_CONTROL {
     cpus 1
     errorStrategy 'retry'
     maxRetries 3
-    memory { 10.GB * task.attempt }
+    memory { 12.GB * task.attempt }
     label 'gopeaks_peak_calling'
     tag "gopeaks_peak_calling_${sample_target.baseName}"
     publishDir "${sample_target}/peaks/", mode: 'copy', overwrite: false, pattern: "*.{bed}"
@@ -728,7 +731,7 @@ process GOPEAKS_PEAKS_NO_CONTROL {
     cpus 1
     errorStrategy 'retry'
     maxRetries 3
-    memory { 10.GB * task.attempt }
+    memory { 12.GB * task.attempt }
     label 'gopeaks_peak_calling'
     tag "gopeaks_peak_calling_${bam.name.split("\\.")[0]}"
     publishDir "${sample}/peaks/", mode: 'copy', overwrite: false, pattern: "*.{bed}"
