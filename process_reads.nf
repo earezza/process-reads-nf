@@ -111,24 +111,60 @@ workflow {
     display_start()
 
     // Read lengths genome mapping based on https://deeptools.readthedocs.io/en/latest/content/feature/effectiveGenomeSize.html
-    def mm10_egs = [50: '2701495761', 75: '2747877777', 100: '2805636331', 150: '2862010578', 200: '2887553303']
-    def hg38_egs = [50: '2308125349', 75: '2407883318', 100: '2467481108', 150: '2494787188', 200: '2520869189']
-    def rn6_egs = [50: '2375372135', 75: '2440746491', 100: '2480029900', 150: '2477334634', 200: '2478552171']
+    mm10_egs = [50: '2701495761', 75: '2747877777', 100: '2805636331', 150: '2862010578', 200: '2887553303']
+    hg38_egs = [50: '2308125349', 75: '2407883318', 100: '2467481108', 150: '2494787188', 200: '2520869189']
+    rn6_egs = [50: '2375372135', 75: '2440746491', 100: '2480029900', 150: '2477334634', 200: '2478552171']
     if (params.assembly == 'mm10'){
-        effective_genome_size = Channel.value( mm10_egs[ params.length ] )
+        effective_genome_size = mm10_egs[ params.length ]
     } else if (params.assembly == 'hg38'){
-        effective_genome_size = Channel.value( hg38_egs[ params.length ] )
+        effective_genome_size = hg38_egs[ params.length ]
     } else if (params.assembly == 'rn6'){
-        effective_genome_size = Channel.value( rn6_egs[ params.length ] )
+        effective_genome_size = rn6_egs[ params.length ]
     } else {
         throw new Exception ("Assembly not available to estimate effective_genome_size")
     }
+    /*
+    if (params.reads_type == 'paired'){
+        target_reads = file(params.target).exists()
+            ?   Channel.fromPath("${params.target}/*_R{1,2}.fastq.gz", type: 'file'', checkIfExists: true)
+                    .map { items -> [file("${params.target}"), items] }
+                    .groupTuple()
+            :   Channel.empty()
+        target_reads.ifEmpty{ throw new Exception ("Unable to get reads from ${params.target}, these are required.") }
+            .map{ it -> return it }
+
+        control_reads = file(params.control).exists()
+            ?   Channel.fromPath("${params.control}/*_R{1,2}.fastq.gz", type: 'file')
+                    .map { items -> [file("${params.control}"), items] }
+                    .groupTuple()
+            :   Channel.empty()
+        control_reads.ifEmpty{ println ("No control reads ${params.control}, proceeding without them.") }
+            .map{ it -> return it }
+    } else {
+        target_reads = file(params.target).exists()
+            ?   Channel.fromPath("${params.target}/*.fastq.gz", type: 'file'', checkIfExists: true)
+                    .map { items -> [file("${params.target}"), items] }
+                    .groupTuple()
+            :   Channel.empty()
+        target_reads.ifEmpty{ throw new Exception ("Unable to get reads from ${params.target}, these are required.") }
+            .map{ it -> return it }
+
+        control_reads = file(params.control).exists()
+            ?   Channel.fromPath("${params.control}/*.fastq.gz", type: 'file')
+                    .map { items -> [file("${params.control}"), items] }
+                    .groupTuple()
+            :   Channel.empty()
+        control_reads.ifEmpty{ throw new Exception ("No control reads ${params.control}, proceeding without them.") }
+            .map{ it -> return it }
+
+    }
+    */
 
     // Load .fastq.gz files
     target_reads = get_reads_ch( params.target )
     control_reads = get_reads_ch( params.control )
 
-    // Get .md5 files
+    // Get .md5 channels
     target_reads
         .flatMap{ id, files ->
             files.collect { item -> tuple(id, item, file("${item}.md5")) }
@@ -165,8 +201,10 @@ workflow {
         .set { raw_reads }
 
     
+    //target_reads.view()    
+    
     // Check file integrity
-    MD5SUMCHECK( target_md5.concat( control_md5 ) )
+    MD5SUMCHECK( target_md5.concat(control_md5) )
 
     // QC on raw reads
     FASTQC_RAW( raw_reads )
@@ -205,9 +243,16 @@ workflow {
 
     // Remove duplicates
     DEDUPLICATE_BAM( QFILTER_BAM.out.bam_qfiltered )
-
-    // Index final alignments for filtered and deduplicated bams
+    
+    // Index final alignments
     INDEX_BAM( QFILTER_BAM.out.bam_qfiltered.concat(DEDUPLICATE_BAM.out.bam_deduplicated) )
+
+    // Separate target and control
+    INDEX_BAM.out.bam_indexed
+        .branch {
+            target: it[0].baseName == params.target.replace('/', '')
+            control: it[0].baseName == params.control.replace('/', '')
+        }.set { bams }
 
     // Separate target and control
     if (params.assay == 'rnaseq') {
@@ -218,7 +263,7 @@ workflow {
             control: it[0].baseName == params.control.replace('/', '') && !it[1].name.contains('NoDups')
         }.set { bams }
     } else {
-        // Use alignments with duplicates removed for other assays
+        // Use duplicate-filtered alignments for other assays
         INDEX_BAM.out.bam_indexed
         .branch {
             target: it[0].baseName == params.target.replace('/', '') && it[1].name.contains('NoDups')
@@ -228,31 +273,23 @@ workflow {
 
     // TODO: Merge replicate alignments into a representative for the sample (typically used when multiple single-end reads in SAMPLE/ directory)
     if (params.merge) {
-        bams.target.groupTuple().concat(bams.control.groupTuple()).view()
-        //error(" Exiting script ")
-        //MERGE_BAMS( bams.target.groupTuple().concat(bams.control.groupTuple()) )
-
-        /*
-        MERGE_BAMS.out.bam_merged
-        .branch {
-            target_merged: it[0].baseName == params.target.replace('/', '')
-            control_merged: it[0].baseName == params.control.replace('/', '')
-        }.set { bams_merged }
-        */
+        MERGE_BAMS( bams.target.groupTuple().concat(bams.control.groupTuple()) )
     }
 
     // Run MultiQC report
-    multiqc_config  = (params.multiqc_config != '') ? Channel.value( file(params.multiqc_config) ) : Channel.value( file('NO_MULTIQC_CONFIG_FILE') )
+    multiqc_config  = (params.multiqc_config != '') ? Channel.fromPath( params.multiqc_config, type: 'file', checkIfExists: true) : Channel.fromPath( 'NO_MULTIQC_CONFIG_FILE' )
     MULTIQC( bams.target.concat(bams.control), multiqc_config )
+
+    // Get genome coverage
+    blacklist_regions  = (params.blacklist != '') ? Channel.fromPath( params.blacklist, type: 'file', checkIfExists: true) : Channel.fromPath( 'NO_BLACKLIST_FILE' )
     
-    // Get genome coverage bigwigs
-    blacklist_regions  = (params.blacklist != '') ? Channel.value( file(params.blacklist) ) : Channel.value( file('NO_BLACKLIST_FILE') )
-    BIGWIG_COVERAGE( bams.target.concat( bams.control ), blacklist_regions, effective_genome_size )
+    // Get bigwigs
+    BIGWIG_COVERAGE( bams.target.concat(bams.control), blacklist_regions, effective_genome_size )
     if (params.control != ''){
         BIGWIG_BAMCOMPARE( bams.target, bams.control, blacklist_regions, effective_genome_size )
     }
-    
-    // Peak calling or stranded bigwigs if RNAseq
+
+    // Peak calling or stranded bigwigs if rnaseq
     if (params.assay != 'rnaseq'){
         // bedgraphs for seacr
         BEDGRAPH_COVERAGE( bams.target.concat(bams.control), blacklist_regions, effective_genome_size )
@@ -261,6 +298,9 @@ workflow {
                 target: it[0].baseName == params.target.replace('/', '')
                 control: it[0].baseName == params.control.replace('/', '')
         }.set { bedgraphs }
+
+	//bedgraphs.target.view()
+	//bedgraphs.control.view()
         // Call peaks
         // Peaks independently
         MACS_NARROWPEAKS_NO_CONTROL( bams.target.concat(bams.control), effective_genome_size )
@@ -276,15 +316,19 @@ workflow {
         }
     } else {
         if (params.stranded){
-            BIGWIG_COVERAGE_STRANDED_FORWARD ( INDEX_BAM.out.bam_indexed, blacklist_regions, effective_genome_size, 'forward' )
-            BIGWIG_COVERAGE_STRANDED_REVERSE ( INDEX_BAM.out.bam_indexed, blacklist_regions, effective_genome_size, 'reverse' )
+            BIGWIG_COVERAGE_STRANDED_FORWARD ( bams.target.concat(bams.control), blacklist_regions, effective_genome_size, 'forward' )
+            BIGWIG_COVERAGE_STRANDED_REVERSE ( bams.target.concat(bams.control), blacklist_regions, effective_genome_size, 'reverse' )
         }
     }
-    
-    // TODO: handle spike-ins if used
-    // Map to spike-in index
-    // Calculate scaling/normalization factor
-    // Get spike-in-normalized coverage
+
+    // If spike-in used, map it
+
+    // If spike-in used, calculate normalization factors
+
+    // If spike-in used, get spike-in-normalized coverage
+
+
+    // If rnaseq, get counts...
     
 }
 
