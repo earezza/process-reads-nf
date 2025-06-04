@@ -14,7 +14,7 @@ export NXF_DISABLE_CHECK_LATEST=true
 
 cd ~/scratch/nextflows/
 
-nextflow run process_reads.nf -c process_reads.config -profile apptainer \
+nextflow run process_reads.nf -c process_reads.config -profile cluster \
 	-with-dag -with-report -with-timeline -w ~/scratch/nextflows/work-cnt/ \
 	--target CUTnTag/ \
 	--reads_type paired \
