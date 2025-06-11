@@ -1,0 +1,7 @@
+module_order:
+  - fastqc
+  - cutadapt
+  - bowtie2
+  - hisat2
+  - samtools
+  - picard
