@@ -217,6 +217,7 @@ workflow {
         FASTQC_TRIMMED( CUTADAPT_PAIRED.out.trimmed_reads )
         // Map reads to reference assembly and sort alignment
         if (params.assay == 'rnaseq') {
+			params.keep_duplicates = true
             HISAT2_PAIRED( CUTADAPT_PAIRED.out.trimmed_reads )
             SORT_BAM( HISAT2_PAIRED.out.mapped_reads )
         } else {
@@ -263,12 +264,21 @@ workflow {
             control: it[0].baseName == params.control.replace('/', '') && !it[1].name.contains('NoDups')
         }.set { bams }
     } else {
-        // Use duplicate-filtered alignments for other assays
-        INDEX_BAM.out.bam_indexed
-        .branch {
-            target: it[0].baseName == params.target.replace('/', '') && it[1].name.contains('NoDups')
-            control: it[0].baseName == params.control.replace('/', '') && it[1].name.contains('NoDups')
-        }.set { bams }
+		if (params.keep_duplicates) {
+        	// Use duplicate-filtered alignments for other assays
+        	INDEX_BAM.out.bam_indexed
+        	.branch {
+            	target: it[0].baseName == params.target.replace('/', '') && !it[1].name.contains('NoDups')
+            	control: it[0].baseName == params.control.replace('/', '') && !it[1].name.contains('NoDups')
+        	}.set { bams }
+		} else {
+        	// Use duplicate-filtered alignments for other assays
+        	INDEX_BAM.out.bam_indexed
+        	.branch {
+            	target: it[0].baseName == params.target.replace('/', '') && it[1].name.contains('NoDups')
+            	control: it[0].baseName == params.control.replace('/', '') && it[1].name.contains('NoDups')
+        	}.set { bams }
+		}
     }
 
     // TODO: Merge replicate alignments into a representative for the sample (typically used when multiple single-end reads in SAMPLE/ directory)
@@ -331,4 +341,5 @@ workflow {
     // If rnaseq, get counts...
     
 }
+
 
