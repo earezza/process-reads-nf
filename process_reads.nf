@@ -111,8 +111,8 @@ workflow {
     display_start()
 
     // Read lengths genome mapping based on https://deeptools.readthedocs.io/en/latest/content/feature/effectiveGenomeSize.html
-    mm10_egs = [50: '2701495761', 75: '2747877777', 100: '2805636331', 150: '2862010578', 200: '2887553303']
-    hg38_egs = [50: '2308125349', 75: '2407883318', 100: '2467481108', 150: '2494787188', 200: '2520869189']
+    hg38_egs = [50: '2701495761', 75: '2747877777', 100: '2805636331', 150: '2862010578', 200: '2887553303']
+    mm10_egs = [50: '2308125349', 75: '2407883318', 100: '2467481108', 150: '2494787188', 200: '2520869189']
     rn6_egs = [50: '2375372135', 75: '2440746491', 100: '2480029900', 150: '2477334634', 200: '2478552171']
     if (params.assembly == 'mm10'){
         effective_genome_size = mm10_egs[ params.length ]
@@ -341,5 +341,6 @@ workflow {
     // If rnaseq, get counts...
     
 }
+
 
 
