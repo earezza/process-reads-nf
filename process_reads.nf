@@ -202,42 +202,48 @@ workflow {
 
     
     //target_reads.view()    
-    
-    // Check file integrity
-    MD5SUMCHECK( target_md5.concat(control_md5) )
 
-    // QC on raw reads
-    FASTQC_RAW( raw_reads )
+	# Skip qc and trimming if facility delivered trimmed and qc already
+	if (params.pretrimmed){
+		BOWTIE2_PAIRED( raw_reads )
+    	SORT_BAM( BOWTIE2_PAIRED.out.mapped_reads )
+	}
+    else {
+    	// Check file integrity
+    	MD5SUMCHECK( target_md5.concat(control_md5) )
 
-    // Process raw reads
-    if (params.reads_type == 'paired'){
-        // Trim
-        CUTADAPT_PAIRED( raw_reads )
-        // QC on trimmed reads
-        FASTQC_TRIMMED( CUTADAPT_PAIRED.out.trimmed_reads )
-        // Map reads to reference assembly and sort alignment
-        if (params.assay == 'rnaseq') {
-			params.keep_duplicates = true
-            HISAT2_PAIRED( CUTADAPT_PAIRED.out.trimmed_reads )
-            SORT_BAM( HISAT2_PAIRED.out.mapped_reads )
-        } else {
-            BOWTIE2_PAIRED( CUTADAPT_PAIRED.out.trimmed_reads )
-            SORT_BAM( BOWTIE2_PAIRED.out.mapped_reads )
-        }
-    } else {
-        // Trim
-        CUTADAPT_SINGLE( raw_reads )
-        // QC on trimmed reads
-        FASTQC_TRIMMED( CUTADAPT_SINGLE.out.trimmed_reads )
-        // Map reads to reference assembly and sort alignment
-        if (params.assay == 'rnaseq') {
-            HISAT2_SINGLE( CUTADAPT_SINGLE.out.trimmed_reads )
-            SORT_BAM( HISAT2_SINGLE.out.mapped_reads )
-        } else {
-            BOWTIE2_SINGLE( CUTADAPT_SINGLE.out.trimmed_reads )
-            SORT_BAM( BOWTIE2_SINGLE.out.mapped_reads )
-        }
-    }
+    	// QC on raw reads
+    	FASTQC_RAW( raw_reads )
+
+    	// Process raw reads
+    	if (params.reads_type == 'paired'){
+        	// Trim
+        	CUTADAPT_PAIRED( raw_reads )
+        	// QC on trimmed reads
+        	FASTQC_TRIMMED( CUTADAPT_PAIRED.out.trimmed_reads )
+        	// Map reads to reference assembly and sort alignment
+        	if (params.assay == 'rnaseq') {
+				params.keep_duplicates = true
+            	HISAT2_PAIRED( CUTADAPT_PAIRED.out.trimmed_reads )
+            	SORT_BAM( HISAT2_PAIRED.out.mapped_reads )
+        	} else {
+            	BOWTIE2_PAIRED( CUTADAPT_PAIRED.out.trimmed_reads )
+            	SORT_BAM( BOWTIE2_PAIRED.out.mapped_reads )
+        	}
+    	} else {
+        	// Trim
+        	CUTADAPT_SINGLE( raw_reads )
+        	// QC on trimmed reads
+        	FASTQC_TRIMMED( CUTADAPT_SINGLE.out.trimmed_reads )
+        	// Map reads to reference assembly and sort alignment
+        	if (params.assay == 'rnaseq') {
+            	HISAT2_SINGLE( CUTADAPT_SINGLE.out.trimmed_reads )
+            	SORT_BAM( HISAT2_SINGLE.out.mapped_reads )
+        	} else {
+            	BOWTIE2_SINGLE( CUTADAPT_SINGLE.out.trimmed_reads )
+            	SORT_BAM( BOWTIE2_SINGLE.out.mapped_reads )
+        	}
+    	}
 
     // Filter out poor alignments
     QFILTER_BAM( SORT_BAM.out.bam_sorted )
