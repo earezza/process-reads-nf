@@ -203,7 +203,7 @@ workflow {
     
     //target_reads.view()    
 
-	# Skip qc and trimming if facility delivered trimmed and qc already
+	// Skip qc and trimming if facility delivered trimmed and qc already
 	if (params.pretrimmed){
 		BOWTIE2_PAIRED( raw_reads )
     	SORT_BAM( BOWTIE2_PAIRED.out.mapped_reads )
