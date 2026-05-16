@@ -244,6 +244,7 @@ workflow {
             	SORT_BAM( BOWTIE2_SINGLE.out.mapped_reads )
         	}
     	}
+	}
 
     // Filter out poor alignments
     QFILTER_BAM( SORT_BAM.out.bam_sorted )
