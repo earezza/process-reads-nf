@@ -60,9 +60,9 @@ def get_reads_ch(reads_dir){
     if ("${reads_dir}" != ''){
         assert file("${reads_dir}").exists() : "Cannot find target reads directory ${reads_dir}"
         if (params.reads_type == 'paired'){
-            assert files("${reads_dir}/*_R{1,2}_*.fastq.gz").size() > 0 : "Expected paired reads...check files in ${reads_dir}"
-            assert files("${reads_dir}/*_R{1,2}_*.fastq.gz").size() %2 == 0 : "Expected paired reads...check files in ${reads_dir}"
-            def reads = Channel.fromFilePairs("${reads_dir}/*_R{1,2}_*.fastq.gz", type: 'file')
+            assert files("${reads_dir}/*_R{1,2}*.fastq.gz").size() > 0 : "Expected paired reads...check files in ${reads_dir}"
+            assert files("${reads_dir}/*_R{1,2}*.fastq.gz").size() %2 == 0 : "Expected paired reads...check files in ${reads_dir}"
+            def reads = Channel.fromFilePairs("${reads_dir}/*_R{1,2}*.fastq.gz", type: 'file')
                 .map { items -> tuple(file("${reads_dir}"), items[1]) }
                 //.groupTuple()
             return reads
