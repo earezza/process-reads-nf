@@ -62,19 +62,19 @@ def get_reads_ch(reads_dir){
         if (params.reads_type == 'paired'){
             assert files("${reads_dir}/*_R{1,2}*.fastq.gz").size() > 0 : "Expected paired reads...check files in ${reads_dir}"
             assert files("${reads_dir}/*_R{1,2}*.fastq.gz").size() %2 == 0 : "Expected paired reads...check files in ${reads_dir}"
-            def reads = Channel.fromFilePairs("${reads_dir}/*_R{1,2}*.fastq.gz", type: 'file')
+            def reads = channel.fromFilePairs("${reads_dir}/*_R{1,2}*.fastq.gz", type: 'file')
                 .map { items -> tuple(file("${reads_dir}"), items[1]) }
                 //.groupTuple()
             return reads
         } else {
             assert files("${reads_dir}/*.fastq.gz").size() > 0 : "Expected reads...check files in ${reads_dir}"
-            def reads = Channel.fromPath("${reads_dir}/*.fastq.gz", type: 'file')
+            def reads = channel.fromPath("${reads_dir}/*.fastq.gz", type: 'file')
                 .map { items -> tuple(file("${reads_dir}"), items) }
                 .groupTuple()
             return reads
         }
     } else {
-        def reads = Channel.empty()
+        def reads = channel.empty()
         return reads
     }
 }
@@ -223,7 +223,6 @@ workflow {
         	FASTQC_TRIMMED( CUTADAPT_PAIRED.out.trimmed_reads )
         	// Map reads to reference assembly and sort alignment
         	if (params.assay == 'rnaseq') {
-				params.keep_duplicates = true
             	HISAT2_PAIRED( CUTADAPT_PAIRED.out.trimmed_reads )
             	SORT_BAM( HISAT2_PAIRED.out.mapped_reads )
         	} else {
@@ -257,33 +256,33 @@ workflow {
 
     // Separate target and control
     INDEX_BAM.out.bam_indexed
-        .branch {
-            target: it[0].baseName == params.target.replace('/', '')
-            control: it[0].baseName == params.control.replace('/', '')
+        .branch { sample ->
+            target: sample[0].baseName == params.target.replace('/', '')
+            control: sample[0].baseName == params.control.replace('/', '')
         }.set { bams }
 
     // Separate target and control
     if (params.assay == 'rnaseq') {
         // Use alignments containing duplicates for RNAseq
         INDEX_BAM.out.bam_indexed
-        .branch {
-            target: it[0].baseName == params.target.replace('/', '') && !it[1].name.contains('NoDups')
-            control: it[0].baseName == params.control.replace('/', '') && !it[1].name.contains('NoDups')
+        .branch { sample ->
+            target: sample[0].baseName == params.target.replace('/', '') && !sample[1].name.contains('NoDups')
+            control: sample[0].baseName == params.control.replace('/', '') && !sample[1].name.contains('NoDups')
         }.set { bams }
     } else {
 		if (params.keep_duplicates) {
         	// Use duplicate-filtered alignments for other assays
         	INDEX_BAM.out.bam_indexed
-        	.branch {
-            	target: it[0].baseName == params.target.replace('/', '') && !it[1].name.contains('NoDups')
-            	control: it[0].baseName == params.control.replace('/', '') && !it[1].name.contains('NoDups')
+        	.branch { sample ->
+            	target: sample[0].baseName == params.target.replace('/', '') && !sample[1].name.contains('NoDups')
+            	control: sample[0].baseName == params.control.replace('/', '') && !sample[1].name.contains('NoDups')
         	}.set { bams }
 		} else {
         	// Use duplicate-filtered alignments for other assays
         	INDEX_BAM.out.bam_indexed
-        	.branch {
-            	target: it[0].baseName == params.target.replace('/', '') && it[1].name.contains('NoDups')
-            	control: it[0].baseName == params.control.replace('/', '') && it[1].name.contains('NoDups')
+        	.branch { sample ->
+            	target: sample[0].baseName == params.target.replace('/', '') && sample[1].name.contains('NoDups')
+            	control: sample[0].baseName == params.control.replace('/', '') && sample[1].name.contains('NoDups')
         	}.set { bams }
 		}
     }
@@ -294,11 +293,11 @@ workflow {
     }
 
     // Run MultiQC report
-    multiqc_config  = (params.multiqc_config != '') ? Channel.fromPath( params.multiqc_config, type: 'file', checkIfExists: true) : Channel.fromPath( 'NO_MULTIQC_CONFIG_FILE' )
+    multiqc_config  = (params.multiqc_config != '') ? channel.fromPath( params.multiqc_config, type: 'file', checkIfExists: true) : channel.fromPath( 'NO_MULTIQC_CONFIG_FILE' )
     MULTIQC( bams.target.concat(bams.control), multiqc_config )
 
     // Get genome coverage
-    blacklist_regions  = (params.blacklist != '') ? Channel.fromPath( params.blacklist, type: 'file', checkIfExists: true) : Channel.fromPath( 'NO_BLACKLIST_FILE' )
+    blacklist_regions  = (params.blacklist != '') ? channel.fromPath( params.blacklist, type: 'file', checkIfExists: true) : channel.fromPath( 'NO_BLACKLIST_FILE' )
     
     // Get bigwigs
     BIGWIG_COVERAGE( bams.target.concat(bams.control), blacklist_regions, effective_genome_size )
@@ -311,9 +310,9 @@ workflow {
         // bedgraphs for seacr
         BEDGRAPH_COVERAGE( bams.target.concat(bams.control), blacklist_regions, effective_genome_size )
         BEDGRAPH_COVERAGE.out.bedgraph
-            .branch {
-                target: it[0].baseName == params.target.replace('/', '')
-                control: it[0].baseName == params.control.replace('/', '')
+            .branch { sample ->
+                target: sample[0].baseName == params.target.replace('/', '')
+                control: sample[0].baseName == params.control.replace('/', '')
         }.set { bedgraphs }
 
 	//bedgraphs.target.view()
