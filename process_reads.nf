@@ -98,9 +98,9 @@ def get_file_ch( file_path ) {
 */
 include { MD5SUMCHECK; MULTIQC; FASTQC as FASTQC_RAW; FASTQC as FASTQC_TRIMMED } from './modules.nf'
 include { CUTADAPT_PAIRED; CUTADAPT_SINGLE } from './modules.nf'
-include { HISAT2_PAIRED; HISAT2_SINGLE; BOWTIE2_PAIRED; BOWTIE2_SINGLE } from './modules.nf'
+include { HISAT2_PAIRED; HISAT2_SINGLE; BOWTIE2_PAIRED; BOWTIE2_SINGLE; BOWTIE2_SPIKEIN_PAIRED; BOWTIE2_SPIKEIN_SINGLE; BOWTIE2_ECOLI_PAIRED; BOWTIE2_ECOLI_SINGLE } from './modules.nf'
 include { MERGE_BAMS; SORT_BAM; QFILTER_BAM; DEDUPLICATE_BAM; INDEX_BAM} from './modules.nf'
-include { BIGWIG_COVERAGE; BIGWIG_BAMCOMPARE; BIGWIG_COVERAGE_STRANDED as BIGWIG_COVERAGE_STRANDED_FORWARD; BIGWIG_COVERAGE_STRANDED as BIGWIG_COVERAGE_STRANDED_REVERSE; BEDGRAPH_COVERAGE } from './modules.nf'
+include { BIGWIG_COVERAGE; BIGWIG_COVERAGE_ECOLI_NORM; BIGWIG_COVERAGE_SPIKEIN_NORM; BIGWIG_BAMCOMPARE; BIGWIG_COVERAGE_STRANDED as BIGWIG_COVERAGE_STRANDED_FORWARD; BIGWIG_COVERAGE_STRANDED as BIGWIG_COVERAGE_STRANDED_REVERSE; BEDGRAPH_COVERAGE } from './modules.nf'
 include { MACS_NARROWPEAKS_CONTROL; MACS_BROADPEAKS_CONTROL; MACS_NARROWPEAKS_NO_CONTROL; MACS_BROADPEAKS_NO_CONTROL; } from './modules.nf'
 include { SEACR_PEAKS_CONTROL; SEACR_PEAKS_NO_CONTROL } from './modules.nf'
 include { GOPEAKS_PEAKS_CONTROL; GOPEAKS_PEAKS_NO_CONTROL } from './modules.nf'
@@ -205,8 +205,19 @@ workflow {
 
 	// Skip qc and trimming if facility delivered trimmed and qc already
 	if (params.pretrimmed){
+
+        
+
 		BOWTIE2_PAIRED( raw_reads )
     	SORT_BAM( BOWTIE2_PAIRED.out.mapped_reads )
+
+        //BOWTIE2_ECOLI_PAIRED( raw_reads )
+        //SORT_BAM( BOWTIE2_ECOLI_PAIRED.out.mapped_reads )
+
+        if (params.spikein != ''){
+            BOWTIE2_SPIKEIN_PAIRED( raw_reads )
+            SORT_BAM( BOWTIE2_SPIKEIN_PAIRED.out.mapped_reads )
+        }
 	}
     else {
     	// Check file integrity

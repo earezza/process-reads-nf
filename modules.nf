@@ -169,7 +169,7 @@ process BOWTIE2_PAIRED {
             .unique().join()
         """
         #!/bin/bash
-        bowtie2 -p $task.cpus --local --very-sensitive-local --no-unal --no-mixed --no-discordant --phred33 -I 10 -X 700 \
+        bowtie2 -p $task.cpus $params.alignment_bowtie2_paired \
         -x $params.genome_index -1 ${reads[0]} -2 ${reads[1]} \
         --rg-id $params.rg_id --rg SM:$params.rg_sm --rg LB:$params.rg_lb --rg PU:$params.rg_pu --rg PL:$params.rg_pl \
         2> bowtie2_${sample.baseName}.log | samtools view -bS - > ${reads_name}.bam 
@@ -193,10 +193,111 @@ process BOWTIE2_SINGLE {
         reads_name = reads.name.replace('_trimmed.fastq', '').replace('.fastq', '')
         """
         #!/bin/bash
-        bowtie2 -p $task.cpus --local --very-sensitive-local --no-unal --phred33 \
+        bowtie2 -p $task.cpus $params.alignment_bowtie2_single \
         -x $params.genome_index -U $reads \
         --rg-id $params.rg_id --rg SM:$params.rg_sm --rg LB:$params.rg_lb --rg PU:$params.rg_pu --rg PL:$params.rg_pl \
         2> bowtie2_${reads.name.split("\\.")[0]}.log | samtools view -bS - > ${reads_name}.bam
+        """
+}
+
+process BOWTIE2_SPIKEIN_PAIRED {
+    cpus Math.max(1, Runtime.runtime.availableProcessors() * 0.5 as int) 
+    label 'bowtie2_align_spikein_paired'
+    tag "bowtie2_align_spikein_paired_${sample.baseName}"
+    publishDir "${sample}/QC/", mode: 'copy', overwrite: false, pattern: "bowtie2_*_spikein.log"
+
+    input:
+        tuple path(sample), path(reads)
+    
+    output:
+        path "bowtie2_${sample.baseName}_spikein.log"
+        tuple path(sample), path("${reads_name}_spikein.bam"), emit: mapped_reads
+    
+    script:
+        reads_name = ["${reads[0].name}", "${reads[1].name}"]
+            .collect { it.replaceAll('_R[1|2]_trimmed.fastq', '').replaceAll('_R[1|2].fastq', '')}
+            .unique().join()
+        """
+        #!/bin/bash
+        bowtie2 -p $task.cpus $params.alignment_spikein_paired \
+        -x $params.spikein_index -1 ${reads[0]} -2 ${reads[1]} \
+        --rg-id $params.rg_id --rg SM:$params.rg_sm --rg LB:$params.rg_lb --rg PU:$params.rg_pu --rg PL:$params.rg_pl \
+        2> bowtie2_${sample.baseName}_spikein.log | samtools view -bS - > ${reads_name}_spikein.bam 
+        """
+}
+
+process BOWTIE2_SPIKEIN_SINGLE {
+    cpus Math.max(1, Runtime.runtime.availableProcessors() * 0.5 as int) 
+    label 'bowtie2_align_spikein_single'
+    tag "bowtie2_align_spikein_single_${reads.name.split("\\.")[0]}"
+    publishDir "${sample}/QC/", mode: 'copy', overwrite: false, pattern: "bowtie2_*_spikein.log"
+
+    input:
+        tuple path(sample), path(reads)
+
+    output:
+        path "bowtie2_${reads.name.split("\\.")[0]}_spikein.log"
+        tuple path(sample), path("${reads_name}_spikein.bam"), emit: mapped_reads
+
+    script:
+        reads_name = reads.name.replace('_trimmed.fastq', '').replace('.fastq', '')
+        """
+        #!/bin/bash
+        bowtie2 -p $task.cpus $params.alignment_spikein_single \
+        -x $params.spikein_index -U $reads \
+        --rg-id $params.rg_id --rg SM:$params.rg_sm --rg LB:$params.rg_lb --rg PU:$params.rg_pu --rg PL:$params.rg_pl \
+        2> bowtie2_${reads.name.split("\\.")[0]}_spikein.log | samtools view -bS - > ${reads_name}_spikein.bam
+        """
+}
+
+
+process BOWTIE2_ECOLI_PAIRED {
+    cpus Math.max(1, Runtime.runtime.availableProcessors() * 0.5 as int) 
+    label 'bowtie2_align_ecoli_paired'
+    tag "bowtie2_align_ecoli_paired_${sample.baseName}"
+    publishDir "${sample}/QC/", mode: 'copy', overwrite: false, pattern: "bowtie2_*_ecoli.log"
+
+    input:
+        tuple path(sample), path(reads)
+    
+    output:
+        path "bowtie2_${sample.baseName}_ecoli.log"
+        tuple path(sample), path("${reads_name}_ecoli.bam"), emit: mapped_reads
+    
+    script:
+        reads_name = ["${reads[0].name}", "${reads[1].name}"]
+            .collect { it.replaceAll('_R[1|2]_trimmed.fastq', '').replaceAll('_R[1|2].fastq', '')}
+            .unique().join()
+        """
+        #!/bin/bash
+        bowtie2 -p $task.cpus $params.alignment_ecoli_paired \
+        -x $params.ecoli_index -1 ${reads[0]} -2 ${reads[1]} \
+        --rg-id $params.rg_id --rg SM:$params.rg_sm --rg LB:$params.rg_lb --rg PU:$params.rg_pu --rg PL:$params.rg_pl \
+        2> bowtie2_${sample.baseName}_ecoli.log | samtools view -bS - > ${reads_name}_ecoli.bam 
+        """
+}
+
+process BOWTIE2_ECOLI_SINGLE {
+    cpus Math.max(1, Runtime.runtime.availableProcessors() * 0.5 as int) 
+    label 'bowtie2_align_ecoli_single'
+    tag "bowtie2_align_ecoli_single_${reads.name.split("\\.")[0]}"
+    publishDir "${sample}/QC/", mode: 'copy', overwrite: false, pattern: "bowtie2_*_ecoli.log"
+
+    input:
+        tuple path(sample), path(reads)
+
+    output:
+        path "bowtie2_${reads.name.split("\\.")[0]}_ecoli.log"
+        tuple path(sample), path("${reads_name}_ecoli.bam"), emit: mapped_reads
+
+    script:
+        reads_name = reads.name.replace('_trimmed.fastq', '').replace('.fastq', '')
+        """
+        #!/bin/bash
+        bowtie2 -p $task.cpus $params.alignment_ecoli_single \
+        -x $params.ecoli_index -U $reads \
+        --rg-id $params.rg_id --rg SM:$params.rg_sm --rg LB:$params.rg_lb --rg PU:$params.rg_pu --rg PL:$params.rg_pl \
+        2> bowtie2_${reads.name.split("\\.")[0]}_ecoli.log | samtools view -bS - > ${reads_name}_ecoli.bam
         """
 }
 
@@ -220,7 +321,7 @@ process HISAT2_PAIRED {
             .unique().join()
         """
         #!/bin/bash
-        hisat2 -p $task.cpus --no-unal --no-mixed --no-discordant --phred33 -I 10 -X 700 \
+        hisat2 -p $task.cpus $params.alignment_hisat2_paired \
         -x $params.genome_index -1 ${reads[0]} -2 ${reads[1]} \
         --rg-id $params.rg_id --rg SM:$params.rg_sm --rg LB:$params.rg_lb --rg PU:$params.rg_pu --rg PL:$params.rg_pl \
         2> hisat2_${sample.baseName}.log | samtools view -bS - > ${reads_name}.bam
@@ -244,7 +345,7 @@ process HISAT2_SINGLE {
         reads_name = reads.name.replace('_trimmed.fastq', '').replace('.fastq', '')
         """
         #!/bin/bash
-        hisat2 -p $task.cpus --no-unal --phred33 \
+        hisat2 -p $task.cpus $params.alignment_hisat2_single \
         -x $params.genome_index -U $reads \
         --rg-id $params.rg_id --rg SM:$params.rg_sm --rg LB:$params.rg_lb --rg PU:$params.rg_pu --rg PL:$params.rg_pl \
         2> hisat2_${reads.name.split("\\.")[0]}.log | samtools view -bS - > ${reads_name}.bam
@@ -413,6 +514,74 @@ process BIGWIG_COVERAGE {
         """
         #!/bin/bash
         bamCoverage --bam $bam -o ${bam.name.split('\\.')[0]}_${params.normalize_by}.bw $coverage_options --effectiveGenomeSize $effective_genome_size
+        """
+}
+
+process BIGWIG_COVERAGE_ECOLI_NORM {
+    cpus Math.max(1, Runtime.runtime.availableProcessors() * 0.5 as int) 
+    label 'bigwig'
+    tag "bigwig_${bam.name.split("\\.")[0]}"
+    publishDir "${sample}/bigwigs/", mode: 'copy', overwrite: false, pattern: "*.{bw}"
+
+    input:
+        tuple path(sample), path(bam), path(bam_index)
+        path blacklist_file
+        val effective_genome_size
+        val scale_factor
+
+    output:
+        path "${bam.name.split('\\.')[0]}_ecoli-normalized.bw", emit: bigwig
+
+    script:
+        blacklist = ("$blacklist_file" == "NO_BLACKLIST_FILE") ? '' : "--blackListFileName $blacklist_file"
+        coverage_options = "--binSize 10 --ignoreForNormalization 'chrM' $blacklist --normalizeUsing 'None' --numberOfProcessors $task.cpus --scaleFactor $scale_factor"
+        if (params.reads_type == 'paired'){
+            coverage_options += " --extendReads"
+        }
+        if (params.assay == 'mnaseq'){
+            coverage_options += ' --MNase'
+        }
+        if (params.assay == 'rnaseq'){
+            coverage_options = coverage_options.replace(" --extendReads", "")
+        }
+        
+        """
+        #!/bin/bash
+        bamCoverage --bam $bam -o ${bam.name.split('\\.')[0]}_ecoli-normalized.bw $coverage_options --effectiveGenomeSize $effective_genome_size
+        """
+}
+
+process BIGWIG_COVERAGE_SPIKEIN_NORM {
+    cpus Math.max(1, Runtime.runtime.availableProcessors() * 0.5 as int) 
+    label 'bigwig'
+    tag "bigwig_${bam.name.split("\\.")[0]}"
+    publishDir "${sample}/bigwigs/", mode: 'copy', overwrite: false, pattern: "*.{bw}"
+
+    input:
+        tuple path(sample), path(bam), path(bam_index)
+        path blacklist_file
+        val effective_genome_size
+        val scale_factor
+
+    output:
+        path "${bam.name.split('\\.')[0]}_${params.spikein}-spikein-norm.bw", emit: bigwig
+
+    script:
+        blacklist = ("$blacklist_file" == "NO_BLACKLIST_FILE") ? '' : "--blackListFileName $blacklist_file"
+        coverage_options = "--binSize 10 --ignoreForNormalization 'chrM' $blacklist --normalizeUsing '' --numberOfProcessors $task.cpus --scaleFactor $scale_factor"
+        if (params.reads_type == 'paired'){
+            coverage_options += " --extendReads"
+        }
+        if (params.assay == 'mnaseq'){
+            coverage_options += ' --MNase'
+        }
+        if (params.assay == 'rnaseq'){
+            coverage_options = coverage_options.replace(" --extendReads", "")
+        }
+        
+        """
+        #!/bin/bash
+        bamCoverage --bam $bam -o ${bam.name.split('\\.')[0]}_${params.spikein}-spikein-norm.bw $coverage_options --effectiveGenomeSize $effective_genome_size
         """
 }
 
@@ -677,7 +846,7 @@ process SEACR_PEAKS_CONTROL {
         peaks_file_prefix = "${bedgraph_target.name.split('\\.')[0]}_without_${bedgraph_control.name.split('\\.')[0]}-control_peaks"
         """
         #!/bin/bash
-        SEACR_1.3.sh ${bedgraph_target} ${bedgraph_control} non stringent ${peaks_file_prefix}
+        SEACR ${bedgraph_target} ${bedgraph_control} non stringent ${peaks_file_prefix}
         """
 }
 
@@ -699,7 +868,7 @@ process SEACR_PEAKS_NO_CONTROL {
         peaks_file_prefix = "${bedgraph.name.split('\\.')[0]}_peaks"
         """
         #!/bin/bash
-        SEACR_1.3.sh ${bedgraph} ${params.seacr_threshold} non stringent ${peaks_file_prefix}
+        SEACR ${bedgraph} ${params.seacr_threshold} non stringent ${peaks_file_prefix}
         """
 }
 
