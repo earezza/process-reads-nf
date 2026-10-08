@@ -1,0 +1,301 @@
+Bootstrap: docker
+From: rocker/r-ver:4.6.0
+
+# Build:   apptainer build dilworthlab.sif dilworthlab.def
+# Check:   apptainer test dilworthlab.sif      (also runs automatically at the end of the build)
+# The definition file is stored inside the image: apptainer inspect --deffile dilworthlab.sif
+
+%environment
+    export LANG=C.UTF-8
+    export LC_ALL=C.UTF-8
+    export PATH=/usr/local/bin:/opt/venv/bin:/meme/bin:/meme/libexec/meme-5.5.9:/usr/local/lib/rmats:$PATH:/opt/homer/bin
+    export VIRTUAL_ENV=/opt/venv
+    export MAKEFLAGS="-j2"
+    export CMAKE_BUILD_PARALLEL_LEVEL=2
+    export OPENBLAS_NUM_THREADS=1
+    export OMP_NUM_THREADS=1
+    export MKL_NUM_THREADS=1
+
+%post
+    set -e
+    export DEBIAN_FRONTEND=noninteractive
+    export TZ=Etc/UTC        # the zone the container already runs in (set by the rocker base image)
+    export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
+    JOBS=$(nproc); if [ "$JOBS" -gt 4 ]; then JOBS=4; fi    # parallel compile/install jobs
+    export MAKEFLAGS="-j${JOBS}" CMAKE_BUILD_PARALLEL_LEVEL=${JOBS}
+    BUILD=/build             # scratch space for downloads; deleted at the end
+    mkdir -p $BUILD
+
+    ## ---- System packages ----------------------------------------------------------
+    # Runtime software stays in the image. Compilers, -dev (header) packages and the
+    # other build-only tools are removed again at the end (see "Clean up").
+    apt-get update
+    apt-get -y upgrade
+    apt-get install -y --no-install-recommends software-properties-common ca-certificates
+    add-apt-repository -y ppa:deadsnakes/ppa                 # Python 3.10
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        openjdk-17-jre python3.10 python3.10-venv libpython3.10 \
+        bedtools hisat2 bwa samtools ncbi-blast+ fastp \
+        ghostscript graphviz gsl-bin perl rsync lz4 liblz4-tool ant gcc unzip xz-utils libcurl4t64 \
+        build-essential gfortran cmake autoconf automake make pkg-config git curl wget \
+        openjdk-17-jdk-headless python3.10-dev \
+        libbz2-dev liblzma-dev libcurl4-openssl-dev libglpk-dev libxml2-dev libmagick++-dev \
+        libuv1-dev libssl-dev zlib1g-dev libreadline-dev libpng-dev libjpeg-dev libcairo2-dev \
+        libpcre2-dev libharfbuzz-dev libfribidi-dev libfreetype-dev libxslt1-dev libboost-all-dev \
+        libhdf5-dev libpq-dev libatlas-base-dev libgsl-dev libgraphviz-dev
+    export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig
+
+    ## ---- R packages (rocker's R 4.6.0 in /usr/local/lib/R, the R on PATH) -------------
+    # CRAN comes from rocker's pinned Posit Package Manager snapshot, which serves
+    # pre-compiled Ubuntu 24.04 binaries; Bioconductor is pointed at Posit's binaries
+    # too, and packages install in parallel. These options apply to the build only.
+    cat > $BUILD/Rprofile <<EOF
+options(Ncpus = ${JOBS})
+options(BioC_mirror = "https://p3m.dev/bioconductor/__linux__/noble/latest")
+EOF
+    export R_PROFILE_USER=$BUILD/Rprofile
+
+    Rscript -e "install.packages(c('curl','httr','optparse','tidyverse','VennDiagram','eulerr','UpSetR','ggupset','ggimage','gridExtra','pheatmap','stringr','Seurat','RColorBrewer','textshaping','ragg','pkgdown','reticulate','paletteer','devtools','remotes','ggthemes'), dependencies = TRUE)"
+    Rscript -e "install.packages(c('BiocManager','doSNOW','getopt'))"
+    Rscript -e "BiocManager::install(c('DiffBind','ChIPseeker','ChIPpeakAnno','ChIPQC','chipseq','clusterProfiler','Rsamtools','edgeR','biomaRt','profileplyr','ensembldb','ReactomePA','csaw','vulcan','topGO','Rgraphviz','org.Hs.eg.db','org.Mm.eg.db','org.Rn.eg.db','EnsDb.Hsapiens.v86','EnsDb.Mmusculus.v79','EnsDb.Rnorvegicus.v79','TxDb.Hsapiens.UCSC.hg19.knownGene','TxDb.Hsapiens.UCSC.hg38.knownGene','TxDb.Mmusculus.UCSC.mm9.knownGene','TxDb.Mmusculus.UCSC.mm10.knownGene','TxDb.Rnorvegicus.UCSC.rn6.refGene','EnhancedVolcano','Rsubread','Category','GOstats','sva','SingleR','celldex','scater','harmony','BiocNeighbors','GENIE3','RcisTarget','AUCell','zoo','mixtools','rbokeh','DT','R2HTML','Rtsne','doMC','PAIRADISE','NMF'), ask = FALSE, update = TRUE, force = TRUE)"
+    Rscript -e "remotes::install_github(c('jokergoo/circlize','jokergoo/ComplexHeatmap','saeyslab/nichenetr','bokeh/rbokeh'))"
+    # rJava, compiled against the image's Java 17 (replaces Ubuntu's r-cran-rjava, which
+    # belonged to a second, apt-installed copy of R that the R on PATH never used)
+    R CMD javareconf > /dev/null
+    Rscript -e "install.packages('rJava', repos = 'https://cloud.r-project.org', type = 'source')"
+    Rscript -e "remove.packages(c('devtools','remotes','pkgdown','BiocManager'), lib = .libPaths()[1])"
+
+    ## ---- Python 3.10 virtual environment (/opt/venv) ---------------------------------
+    python3.10 -m venv /opt/venv
+    . /opt/venv/bin/activate
+    pip install --no-cache-dir --upgrade pip setuptools wheel build
+    pip install --no-cache-dir --default-timeout=1000 \
+        pandas numpy suds jupyterlab notebook nbconvert seaborn marimo PyYAML rpy2 scikit-learn scipy statsmodels beautifulsoup4 \
+        deeptools kb_python pymemesuite macs3 liftover scanpy louvain leidenalg umap-learn PhenoGraph palantir fa2 h5py igraph beta-binding-analysis SICER2 \
+        loompy scvelo gseapy scanorama magic-impute phate bbknn dca cellbrowser \
+        cutadapt multiqc
+    #scvi-tools pyscenic harmony-pytorch
+
+    # IDR 2.0.3, patched for current NumPy/Cython
+    cd $BUILD
+    wget -q -O idr-2.0.3.zip https://github.com/nboley/idr/archive/refs/tags/2.0.3.zip
+    unzip -q idr-2.0.3.zip
+    cd idr-2.0.3
+    sed -i 's/np\.int_t/np.intp_t/g' idr/inv_cdf.pyx
+    sed -i '1i# cython: language_level=3' idr/inv_cdf.pyx
+    sed -i 's/numpy\.int/int/g; s/np\.int/int/g' idr/idr.py
+    python3 setup.py install
+
+    ## ---- Command-line tools -------------------------------------------------------------
+    cd $BUILD
+
+    # bowtie2: launchers and release binaries (incl. the -v256 AVX2 builds); the -debug
+    # builds (~225 MB, only used by `bowtie2 --debug`) are left out
+    wget -q https://github.com/BenLangmead/bowtie2/releases/download/v2.5.5/bowtie2-2.5.5-linux-x86_64.zip
+    unzip -q bowtie2-2.5.5-linux-x86_64.zip
+    find bowtie2-2.5.5-linux-x86_64 -maxdepth 1 -type f -name 'bowtie2*' ! -name '*-debug*' -exec cp {} /usr/local/bin/ \;
+
+    wget -q https://www.bioinformatics.babraham.ac.uk/projects/fastqc/fastqc_v0.12.1.zip
+    unzip -q fastqc_v0.12.1.zip -d /opt
+    ln -s /opt/FastQC/fastqc /usr/local/bin/fastqc
+
+    wget -q -O meme-5.5.9.tar.gz https://meme-suite.org/meme/meme-software/5.5.9/meme-5.5.9.tar.gz
+    tar xzf meme-5.5.9.tar.gz
+    cd meme-5.5.9
+    ./configure --prefix=/meme --enable-build-libxml2 --enable-build-libxslt
+    make
+    make install
+    cd $BUILD
+
+    # Trimmomatic: jar in /usr/local/share as before; adapter FASTAs kept at /adapters
+    wget -q https://github.com/usadellab/Trimmomatic/releases/download/v0.40/Trimmomatic-0.40.zip
+    unzip -q Trimmomatic-0.40.zip -d trimmomatic
+    mv trimmomatic/trimmomatic-0.40.jar /usr/local/share/trimmomatic-0.40.jar
+    mv trimmomatic/adapters /usr/local/share/trimmomatic-adapters
+    ln -s /usr/local/share/trimmomatic-adapters /adapters
+    printf '#!/bin/bash\nexec java -jar /usr/local/share/trimmomatic-0.40.jar "$@"\n' > /usr/local/bin/trimmomatic
+
+    wget -q -O FastQ-Screen-0.16.0.tar.gz https://github.com/StevenWingett/FastQ-Screen/archive/refs/tags/v0.16.0.tar.gz
+    tar xzf FastQ-Screen-0.16.0.tar.gz -C /opt
+    ln -s /opt/FastQ-Screen-0.16.0/fastq_screen /usr/local/bin/fastq_screen
+
+    wget -q -O /usr/local/share/picard.jar https://github.com/broadinstitute/picard/releases/download/3.4.0/picard.jar
+    printf '#!/bin/bash\nexec java -jar /usr/local/share/picard.jar "$@"\n' > /usr/local/bin/picard
+
+    wget -q https://sourceforge.net/projects/subread/files/subread-2.1.1/subread-2.1.1-Linux-x86_64.tar.gz
+    tar xzf subread-2.1.1-Linux-x86_64.tar.gz
+    cp -r subread-2.1.1-Linux-x86_64/bin/* subread-2.1.1-Linux-x86_64/bin/utilities/* /usr/local/bin/
+
+    wget -q https://github.com/COMBINE-lab/salmon/releases/download/v1.11.4/salmon-linux-x86_64.tar.gz
+    tar xzf salmon-linux-x86_64.tar.gz
+    cp salmon-linux-x86_64/bin/salmon /usr/local/bin/
+
+    wget -q -O STAR-2.7.11b.tar.gz https://github.com/alexdobin/STAR/archive/2.7.11b.tar.gz
+    tar xzf STAR-2.7.11b.tar.gz
+    cp STAR-2.7.11b/bin/Linux_x86_64/STAR /usr/local/bin/
+
+    # UCSC Kent utilities
+    rsync -az rsync://hgdownload.soe.ucsc.edu/genome/admin/exe/linux.x86_64/ /usr/local/bin/
+
+    git clone --depth 1 https://github.com/Xinglab/rmats-turbo.git rmats-turbo
+    cd rmats-turbo
+    ./build_rmats
+    mkdir -p /usr/local/lib/rmats
+    cp -a ./* /usr/local/lib/rmats/
+    printf '#!/bin/sh\nexec python /usr/local/lib/rmats/rmats.py "$@"\n' > /usr/local/bin/rmats
+    cd $BUILD
+
+    git clone --depth 1 https://github.com/jsh58/Genrich.git Genrich
+    make -C Genrich
+    cp Genrich/Genrich /usr/local/bin/
+
+    wget -q -O /usr/local/bin/gopeaks https://github.com/maxsonBraunLab/gopeaks/releases/download/v1.0.0/gopeaks-linux-amd64
+
+    # SEACR: the launcher finds SEACR_1.3.R next to itself, so both go in /usr/local/bin
+    git clone --depth 1 https://github.com/FredHutch/SEACR.git SEACR
+    cp SEACR/SEACR_1.3.sh /usr/local/bin/SEACR
+    cp SEACR/SEACR_1.3.R /usr/local/bin/SEACR_1.3.R
+
+    git clone --depth 1 https://github.com/lh3/seqtk.git seqtk
+    make -C seqtk
+    cp seqtk/seqtk /usr/local/bin/
+
+    # HOMER (base install) in /opt/homer, added to the end of PATH
+    mkdir -p /opt/homer
+    cd /opt/homer
+    wget -q http://homer.ucsd.edu/homer/configureHomer.pl
+    perl configureHomer.pl -install
+    rm -f configureHomer.pl
+
+    chmod +x /usr/local/bin/SEACR /usr/local/bin/trimmomatic /usr/local/bin/picard /usr/local/bin/rmats /usr/local/bin/gopeaks
+
+    ## ---- Clean up: remove build-only packages, keep every runtime library ---------------
+    cd /
+    # Print "<file> <ldd line>" for every program/library under the given folders.
+    scan_libs() {
+        find "$@" -type f \( -name '*.so' -o -name '*.so.*' -o -perm -u+x \) 2>/dev/null |
+        while IFS= read -r f; do ldd "$f" 2>/dev/null | sed "s|^|$f |"; done
+    }
+    scan_libs /usr/local /opt /meme > $BUILD/ldd_before.txt
+    awk '/not found/ {print $1, $2}' $BUILD/ldd_before.txt | sort -u > $BUILD/missing_before.txt
+
+    # 1. Keep the apt package behind every shared library that installed software links to.
+    awk '$3 == "=>" && $4 ~ /^\// {print $4}' $BUILD/ldd_before.txt | sort -u | xargs -r realpath -e 2>/dev/null | sort -u |
+        while IFS= read -r lib; do dpkg -S "$lib" 2>/dev/null || dpkg -S "${lib#/usr}" 2>/dev/null || true; done |
+        cut -d: -f1 | sort -u > $BUILD/linked_pkgs.txt
+    # 2. Keep every runtime library the -dev packages brought in (only headers, static
+    #    libraries and build tools go), so libraries loaded at run time stay too.
+    dpkg-query -W -f='${Package}\n' | grep -E -- '-dev$' | sort -u > $BUILD/dev_pkgs.txt
+    apt-cache depends --recurse --installed --no-suggests --no-conflicts --no-breaks --no-replaces --no-enhances \
+        $(cat $BUILD/dev_pkgs.txt) 2>/dev/null | grep -E '^lib' | grep -vE -- '-dev$' | sort -u > $BUILD/dev_runtime_pkgs.txt
+    # 3. Software that must stay installed.
+    KEEP="openjdk-17-jre python3.10 python3.10-venv libpython3.10 bedtools hisat2 bwa samtools ncbi-blast+ fastp \
+          ghostscript graphviz gsl-bin perl rsync lz4 liblz4-tool ant gcc unzip xz-utils libcurl4t64 ca-certificates"
+    cat $BUILD/linked_pkgs.txt $BUILD/dev_runtime_pkgs.txt | xargs -r apt-mark manual > /dev/null
+    apt-mark manual $KEEP > /dev/null
+    # Nothing these depend on may be removed.
+    apt-cache depends --recurse --installed --no-suggests --no-conflicts --no-breaks --no-replaces --no-enhances \
+        $KEEP $(cat $BUILD/linked_pkgs.txt $BUILD/dev_runtime_pkgs.txt) 2>/dev/null | grep -E '^[a-z0-9]' | sort -u > $BUILD/protected.txt
+    { cat $BUILD/dev_pkgs.txt
+      printf '%s\n' build-essential g++ gfortran cmake autoconf automake make pkg-config git curl wget \
+          software-properties-common openjdk-17-jdk-headless
+    } | sort -u | grep -vxF -f $BUILD/protected.txt > $BUILD/purge.txt
+    apt-get purge -y $(cat $BUILD/purge.txt)
+    apt-get autoremove -y --purge
+
+    # Stop the build if the clean-up removed anything still needed.
+    for p in $KEEP; do
+        dpkg -s "$p" > /dev/null 2>&1 || { echo "ERROR: clean-up removed $p"; exit 1; }
+    done
+    scan_libs /usr/local /opt /meme | awk '/not found/ {print $1, $2}' | sort -u > $BUILD/missing_after.txt
+    if [ -n "$(comm -13 $BUILD/missing_before.txt $BUILD/missing_after.txt)" ]; then
+        echo "ERROR: clean-up removed shared libraries that installed software needs:"
+        comm -13 $BUILD/missing_before.txt $BUILD/missing_after.txt
+        exit 1
+    fi
+
+    apt-get clean
+    rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/* /root/.cache/* $BUILD
+    find /var/tmp -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
+    find /usr/local/lib/R -name '00LOCK*' -type d -prune -exec rm -rf -- {} + 2>/dev/null || true
+    find /usr/local/lib/R -type d \( -name 'doc' -o -name 'help' -o -name 'html' -o -name 'demo' -o -name 'examples' -o -name 'tests' -o -name 'vignettes' \) -prune -exec rm -rf -- {} + 2>/dev/null || true
+    find /usr/local -name '__pycache__' -type d -prune -exec rm -rf -- {} + 2>/dev/null || true
+    find /usr/local -name '*.pyc' -delete 2>/dev/null || true
+
+%test
+    # Fails the test if any command-line tool cannot run; R and Python packages that
+    # cannot be loaded are listed as warnings.
+    fail=0
+    check() {
+        rc=0; out=$("$@" 2>&1) || rc=$?
+        if [ "$rc" -eq 126 ] || [ "$rc" -eq 127 ] || echo "$out" | grep -q 'error while loading shared libraries'; then
+            echo "FAIL  $*: $(echo "$out" | tail -n 1)"; fail=1
+        else
+            echo "ok    $1"
+        fi
+    }
+    for t in bwa seqtk SEACR homer2 findMotifsGenome.pl bigWigToWig wigToBigWig faSize bedGraphToBigWig; do check $t; done
+    check bedtools --version;   check bowtie2 --version;   check bowtie2-build --version
+    check cutadapt --version;   check fastp --version;     check fastq_screen --version
+    check fastqc --version;     check Genrich --version;   check gopeaks --version
+    check hisat2 --version;     check meme -version;       check multiqc --version
+    check blastn -version;      check picard SortSam --version; check salmon --version
+    check samtools --version;   check STAR --version;      check featureCounts -v
+    check trimmomatic -version; check rmats --version;     check bamCoverage --version
+    check macs3 --version;      check idr --version;       check sicer --version
+    check kb --version;         check jupyter --version;   check java -version
+    check Rscript --version;    check python --version;    check gs --version
+    check dot -V;               check gcc --version;       check perl -v
+    check lz4 --version;        check rsync --version;     check ant -version
+    [ -f /usr/local/bin/SEACR_1.3.R ] || { echo "FAIL  SEACR_1.3.R missing"; fail=1; }
+    [ -f /adapters/TruSeq3-PE.fa ]    || { echo "FAIL  Trimmomatic adapters missing"; fail=1; }
+
+    for p in curl httr optparse tidyverse VennDiagram eulerr UpSetR ggupset ggimage gridExtra pheatmap stringr Seurat \
+             RColorBrewer textshaping ragg reticulate paletteer ggthemes doSNOW getopt rJava circlize ComplexHeatmap nichenetr \
+             DiffBind ChIPseeker ChIPpeakAnno ChIPQC chipseq clusterProfiler Rsamtools edgeR biomaRt profileplyr ensembldb \
+             ReactomePA csaw vulcan topGO Rgraphviz org.Hs.eg.db org.Mm.eg.db org.Rn.eg.db EnsDb.Hsapiens.v86 \
+             EnsDb.Mmusculus.v79 EnsDb.Rnorvegicus.v79 TxDb.Hsapiens.UCSC.hg19.knownGene TxDb.Hsapiens.UCSC.hg38.knownGene \
+             TxDb.Mmusculus.UCSC.mm9.knownGene TxDb.Mmusculus.UCSC.mm10.knownGene TxDb.Rnorvegicus.UCSC.rn6.refGene \
+             EnhancedVolcano Rsubread Category GOstats sva SingleR celldex scater harmony BiocNeighbors GENIE3 RcisTarget \
+             AUCell zoo mixtools rbokeh DT R2HTML Rtsne doMC PAIRADISE NMF; do
+        Rscript -e "quit(status = !suppressMessages(requireNamespace('$p', quietly = TRUE)))" > /dev/null 2>&1 \
+            || echo "WARN  R package $p does not load"
+    done
+    for m in pandas numpy suds jupyterlab notebook nbconvert seaborn marimo yaml rpy2 sklearn scipy statsmodels bs4 \
+             deeptools kb_python pymemesuite MACS3 liftover scanpy louvain leidenalg umap phenograph palantir fa2 h5py \
+             igraph sicer loompy scvelo gseapy scanorama magic phate bbknn dca cellbrowser idr cutadapt multiqc; do
+        python -c "import $m" > /dev/null 2>&1 || echo "WARN  Python module $m does not import"
+    done
+    exit $fail
+
+%runscript
+    exec "$@"
+
+%labels
+    Author Eric Arezza
+    Version v1.1.0
+
+%help
+    This container is a dry lab with many common bioinformatics tools, Python packages, R packages, and more installed.
+
+    Programs include, but not limited to:
+        bedtools bowtie2 bwa cutadapt fastp fastq_screen fastqc genrich gopeaks hisat2 homer kentutils meme-suite
+        multiqc ncbi-blast+ picard salmon samtools seacr seqtk star subread trimmomatic rmats
+        deeptools idr jupyter macs3 scanpy sicer2
+        chipseeker chippeakanno clusterprofiler csaw deseq2 diffbind edger seurat
+
+    Trimmomatic adapter FASTAs: /adapters (e.g. ILLUMINACLIP:/adapters/TruSeq3-PE.fa:2:30:10)
+    HOMER is installed in /opt/homer.
+
+    Search documentation for desired program's command-line execution and API references.
+
+    For Python packages list:
+        apptainer exec dilworthlab.sif pip list
+    For R packages list:
+        apptainer exec dilworthlab.sif Rscript -e 'print(installed.packages()[, c("Package", "Version")])'
+    To check that all programs run:
+        apptainer test dilworthlab.sif
+
+    To execute programs:
+        apptainer exec dilworthlab.sif <program command>
